@@ -114,7 +114,7 @@ class AirPistolTargetPainter extends CustomPainter {
       final shot = shots[i];
       final isLatestShot = i == shots.length - 1;
 
-      // ISSF caliber size (4.5mm) scaled to target
+      // Pellet size (4.5mm) scaled to target
       final shotRadius = 2.25 * effectiveScale; // 4.5mm diameter / 2
 
       // Draw shot hole with gradient (darker rim)

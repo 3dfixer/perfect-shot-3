@@ -70,11 +70,13 @@ class SessionReviewScreen extends StatelessWidget {
                 Card(
                   color: const Color(0xFF1E3A8A),
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        // Text is scaled down to fit on one line rather than
+                        // wrapping, so the card never outgrows its grid cell.
+                        const _FitLine(
                           'Perfect Shot',
                           style: TextStyle(
                             fontSize: 24,
@@ -82,11 +84,11 @@ class SessionReviewScreen extends StatelessWidget {
                             color: Colors.white,
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
+                        const SizedBox(height: 4),
+                        _FitLine(
                           targetType == TargetType.airPistol
-                              ? 'ISSF 10m Air Pistol'
-                              : 'ISSF 10m Air Rifle',
+                              ? '10m Air Pistol'
+                              : '10m Air Rifle',
                           style: const TextStyle(
                             fontSize: 18,
                             color: Colors.blue,
@@ -149,13 +151,16 @@ class SessionReviewScreen extends StatelessWidget {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'Series ${i + 1}',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                              Flexible(
+                                child: _FitLine(
+                                  'Series ${i + 1}',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
+                              const SizedBox(width: 8),
                               Text(
                                 formatScore(useDecimalScoring
                                     ? allSeries[i].decimalTotalScore
@@ -252,15 +257,42 @@ class SessionReviewScreen extends StatelessWidget {
               color: Colors.blue,
             ),
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.white,
+          const SizedBox(width: 8),
+          Flexible(
+            child: _FitLine(
+              value,
+              alignment: Alignment.centerRight,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.white,
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A single line of text that shrinks to fit the available width instead of
+/// wrapping or overflowing.
+class _FitLine extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  final Alignment alignment;
+
+  const _FitLine(
+    this.text, {
+    required this.style,
+    this.alignment = Alignment.centerLeft,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: alignment,
+      child: Text(text, style: style, maxLines: 1, softWrap: false),
     );
   }
 }
