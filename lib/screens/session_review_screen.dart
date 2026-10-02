@@ -75,7 +75,7 @@ class SessionReviewScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Freetarget',
+                          'Perfect Shot',
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,

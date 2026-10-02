@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 
 void main() {
-  runApp(const FreeTargetApp());
+  runApp(const PerfectShotApp());
 }
 
-class FreeTargetApp extends StatelessWidget {
-  const FreeTargetApp({super.key});
+class PerfectShotApp extends StatelessWidget {
+  const PerfectShotApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FreeTarget 10.9',
+      title: 'Perfect Shot',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
