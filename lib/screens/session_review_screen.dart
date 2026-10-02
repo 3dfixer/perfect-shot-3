@@ -108,7 +108,7 @@ class SessionReviewScreen extends StatelessWidget {
                     child: Column(
                       children: [
                         Text(
-                          'Total Score: ${useDecimalScoring ? totalDecimalScore.toStringAsFixed(1) : totalScore.toStringAsFixed(0)}',
+                          'Total Score: ${formatScore(useDecimalScoring ? totalDecimalScore : totalScore)}',
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -157,9 +157,9 @@ class SessionReviewScreen extends StatelessWidget {
                                 ),
                               ),
                               Text(
-                                useDecimalScoring
-                                    ? allSeries[i].decimalTotalScore.toStringAsFixed(1)
-                                    : allSeries[i].totalScore.toStringAsFixed(0),
+                                formatScore(useDecimalScoring
+                                    ? allSeries[i].decimalTotalScore
+                                    : allSeries[i].totalScore),
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
@@ -205,9 +205,9 @@ class SessionReviewScreen extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    useDecimalScoring
-                                        ? '${shot.decimalScore.toStringAsFixed(1)}${shot.isInnerTen ? '*' : ''}'
-                                        : shot.score.toStringAsFixed(0),
+                                    formatScore(useDecimalScoring
+                                        ? shot.decimalScore
+                                        : shot.score),
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,

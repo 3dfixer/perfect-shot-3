@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/shot.dart';
+import 'target_painters.dart';
 
 class GroupAnalysis {
   /// Calculate Mean Point of Impact (MPI) - the center of the shot group
@@ -158,16 +159,29 @@ class GroupAnalysis {
 
 class GroupAnalysisPainter extends CustomPainter {
   final List<Shot> shots;
-  final double scale;
+  final TargetType targetType;
+  final double zoomLevel;
 
   GroupAnalysisPainter({
     required this.shots,
-    required this.scale,
+    required this.targetType,
+    required this.zoomLevel,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     if (shots.isEmpty) return;
+
+    // Use exactly the same scale as the target painter so the overlay lines
+    // up with the shot holes.
+    final isPistol = targetType == TargetType.airPistol;
+    final cardSize = isPistol
+        ? AirPistolTargetPainter.ringDiameters[0]
+        : AirRifleTargetPainter.ringDiameters[0];
+    final baseScale = isPistol
+        ? AirPistolTargetPainter.baseScale
+        : AirRifleTargetPainter.baseScale;
+    final scale = size.width / (cardSize * 1.2) * baseScale * zoomLevel;
 
     final center = Offset(size.width / 2, size.height / 2);
 

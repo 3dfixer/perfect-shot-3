@@ -18,7 +18,11 @@ class ConnectionHandler {
     required this.onDisconnect,
   });
 
+  /// Target type used to score incoming shots. Can be changed while connected.
+  TargetType targetType = TargetType.airPistol;
+
   Future<void> connect(String ip, int port, TargetType targetType) async {
+    this.targetType = targetType;
     if (isConnected) {
       await disconnect();
       return;
@@ -26,13 +30,17 @@ class ConnectionHandler {
 
     try {
       onMessage('Connecting to ETS...');
-      socket = await Socket.connect(ip, port);
+      socket = await Socket.connect(
+        ip,
+        port,
+        timeout: const Duration(seconds: 5),
+      );
       isConnected = true;
       lastKeepAlive = DateTime.now();
       onMessage('Connected to ETS');
 
       socket!.listen(
-        (data) => _handleIncomingData(data, targetType),
+        _handleIncomingData,
         onError: _handleError,
         onDone: _handleDisconnection,
       );
@@ -42,37 +50,49 @@ class ConnectionHandler {
     }
   }
 
-  void _handleIncomingData(List<int> data, TargetType targetType) {
-    String message = utf8.decode(data);
-    
-    onMessage('Original message: $message');
+  void _handleIncomingData(List<int> data) {
+    final received = utf8.decode(data, allowMalformed: true);
+
+    onMessage('Original message: $received');
 
     lastKeepAlive = DateTime.now();
-    incomingJSON += message;
+    incomingJSON += received;
     incomingJSON = incomingJSON.replaceAll(", ,", ",,").replaceAll(",,", ",");
 
     int indexOpenBracket = 0;
     int indexClosedBracket = 0;
 
     try {
-      indexOpenBracket = incomingJSON.indexOf('{');
-      if (indexOpenBracket > -1) {
+      // A single packet may contain several messages, or only part of one,
+      // so keep extracting complete {...} messages until none are left.
+      while (true) {
+        indexOpenBracket = incomingJSON.indexOf('{');
+        if (indexOpenBracket < 0) {
+          // No message start in the buffer, so anything left is junk.
+          incomingJSON = "";
+          break;
+        }
+
         indexClosedBracket = incomingJSON.indexOf('}', indexOpenBracket);
-        if (indexClosedBracket > -1) {
-          message = incomingJSON.substring(
-              indexOpenBracket, indexClosedBracket + 1);
-          incomingJSON = incomingJSON.substring(indexClosedBracket + 1);
-          onMessage('json message: $message');
+        if (indexClosedBracket < 0) {
+          // Incomplete message; wait for more data.
+          incomingJSON = incomingJSON.substring(indexOpenBracket);
+          break;
+        }
 
-          if (message.contains('KEEP_ALIVE')) {
-            onMessage('Keep alive received');
-          } else if (message.contains('shot')) {
-            _processShotData(message, targetType);
-          }
+        final message = incomingJSON.substring(
+            indexOpenBracket, indexClosedBracket + 1);
+        incomingJSON = incomingJSON.substring(indexClosedBracket + 1);
+        onMessage('json message: $message');
 
-          onMessage('Remaining JSON buffer: $incomingJSON');
+        if (message.contains('KEEP_ALIVE')) {
+          onMessage('Keep alive received');
+        } else if (message.contains('shot')) {
+          _processShotData(message, targetType);
         }
       }
+
+      onMessage('Remaining JSON buffer: $incomingJSON');
     } catch (e) {
       onMessage('Error in JSON buffer: $incomingJSON');
       onMessage('JSON parsing indexes - Start: $indexOpenBracket, End: $indexClosedBracket');

@@ -25,7 +25,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Target and scoring
   List<Series> allSeries = [];
+  // Series currently being viewed on the target
   int currentSeriesIndex = 0;
+  // Series that new shots are recorded into
+  int activeSeriesIndex = 0;
   double totalScore = 0;
   double totalDecimalScore = 0;
   double zoomLevel = 2.0;
@@ -54,7 +57,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController portController =
       TextEditingController(text: '1090');
 
-  // Add these properties after other declarations
+  // Simulation (demo) mode
+  static const int _simulationMaxShots = 60;
+  static const double _simulationMinScore = 2;
   bool isSimulating = false;
   Timer? _simulationTimer;
   final Random _random = Random();
@@ -71,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onMessage: _addMessage,
       onShot: _handleShot,
       onDisconnect: () {
+        if (!mounted) return;
         setState(() {
           isConnected = false;
         });
@@ -79,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _addMessage(String message) {
+    if (!mounted) return;
     setState(() {
       recentMessages.insert(
           0, '${DateTime.now().toString().split('.')[0]} - $message');
@@ -104,47 +111,77 @@ class _HomeScreenState extends State<HomeScreen> {
         int.parse(portController.text),
         targetType,
       );
-      setState(() {
-        isConnected = true;
-      });
     } catch (e) {
-      setState(() {
-        isConnected = false;
-      });
+      _addMessage('Connection failed: $e');
     }
+
+    if (!mounted) return;
+    // connect() reports failures itself, so trust its real state.
+    setState(() {
+      isConnected = connectionHandler.isConnected;
+    });
   }
 
   void _handleShot(Shot shot) {
+    if (!mounted) return;
+
+    final currentSeries = allSeries[activeSeriesIndex];
+    if (currentSeries.shots.length >= 10) {
+      // Session is complete; ignore extra shots until scores are reset.
+      _addMessage('Series full - shot ignored. Reset scores to continue.');
+      return;
+    }
+
     setState(() {
-      Series currentSeries = allSeries[currentSeriesIndex];
       currentSeries.shots.add(shot);
       currentSeries.totalScore += shot.score;
       currentSeries.decimalTotalScore += shot.decimalScore;
       totalScore += shot.score;
       totalDecimalScore += shot.decimalScore;
-
-      _addMessage(
-          'Shot scored: ${shot.decimalScore.toStringAsFixed(1)}${shot.isInnerTen ? '*' : ''}');
-
-      if (currentSeries.shots.length == 10) {
-        _handleSeriesComplete();
-      }
     });
+
+    _addMessage('Shot scored: ${formatScore(shot.decimalScore)}');
+
+    if (currentSeries.shots.length == 10) {
+      _handleSeriesComplete();
+    }
   }
 
   void _handleSeriesComplete() {
-    if (currentSeriesIndex < 5) {
+    if (activeSeriesIndex < 5) {
       setState(() {
-        currentSeriesIndex++;
+        activeSeriesIndex++;
+        currentSeriesIndex = activeSeriesIndex;
         _canSwipeTargets = true;
+      });
+      if (_targetPageController.hasClients) {
         _targetPageController.animateToPage(
-          currentSeriesIndex,
+          activeSeriesIndex,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
         );
-      });
+      }
     } else {
       _showSessionReview();
+    }
+  }
+
+  /// Clears all shots and returns both the active series and the target view
+  /// to Series 1.
+  void _resetSession() {
+    _stopSimulation();
+    setState(() {
+      for (var series in allSeries) {
+        series.reset();
+      }
+      currentSeriesIndex = 0;
+      activeSeriesIndex = 0;
+      totalScore = 0;
+      totalDecimalScore = 0;
+      _canSwipeTargets = false;
+    });
+    if (_targetPageController.hasClients) {
+      _targetPageController.jumpToPage(0);
     }
   }
 
@@ -311,14 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () {
-              setState(() {
-                for (var series in allSeries) {
-                  series.reset();
-                }
-                currentSeriesIndex = 0;
-                totalScore = 0;
-                totalDecimalScore = 0;
-              });
+              _resetSession();
               Navigator.pop(context);
             },
             child: const Text('Reset Without Review'),
@@ -345,15 +375,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () {
-              setState(() {
-                for (var series in allSeries) {
-                  series.reset();
-                }
-                currentSeriesIndex = 0;
-                totalScore = 0;
-                totalDecimalScore = 0;
-                _addMessage('Scores reset');
-              });
+              _resetSession();
+              _addMessage('Scores reset');
               Navigator.pop(context);
             },
             child: const Text('Reset Without Review'),
@@ -552,25 +575,41 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Add this method after other methods
-  void _startSimulation() {
-    // Don't start if we already have 60 shots
-    int totalShots = allSeries.fold(0, (sum, series) => sum + series.shots.length);
-    if (totalShots >= 60) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Maximum shots reached. Reset scores to start new simulation.'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
+  // Simulation (demo) mode
+  int get _totalShots =>
+      allSeries.fold(0, (sum, series) => sum + series.shots.length);
 
-    if (isSimulating) {
-      _simulationTimer?.cancel();
+  void _stopSimulation() {
+    _simulationTimer?.cancel();
+    _simulationTimer = null;
+    if (isSimulating && mounted) {
       setState(() {
         isSimulating = false;
       });
+    } else {
+      isSimulating = false;
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  void _toggleSimulation() {
+    if (isSimulating) {
+      _stopSimulation();
+      return;
+    }
+
+    if (isConnected) {
+      _showSnack('Disconnect from the target before starting a simulation.');
+      return;
+    }
+
+    if (_totalShots >= _simulationMaxShots) {
+      _showSnack('Maximum shots reached. Reset scores to start new simulation.');
       return;
     }
 
@@ -580,13 +619,14 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Simulation Settings'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('This will generate random shots with:'),
             const SizedBox(height: 8),
-            const Text('• 1 second between shots'),
-            const Text('• Random spread within scoring zones'),
-            const Text('• Realistic scoring distribution'),
-            const Text('• Will stop after 60 shots total'),
+            const Text('- 1 second between shots'),
+            const Text('- Random spread around the centre'),
+            Text('- Lowest score of ${_simulationMinScore.toStringAsFixed(0)}'),
+            const Text('- Stops after $_simulationMaxShots shots total'),
             const SizedBox(height: 16),
             const Text('Press Start to begin simulation'),
           ],
@@ -598,11 +638,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () {
+              Navigator.pop(context);
               setState(() {
                 isSimulating = true;
               });
-              _simulateShots();
-              Navigator.pop(context);
+              _runSimulation();
             },
             child: const Text('Start'),
           ),
@@ -611,7 +651,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _simulateShots() {
+  void _runSimulation() {
     _simulationTimer?.cancel();
     _simulationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!isSimulating) {
@@ -619,84 +659,37 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // Check if we've reached 60 shots
-      int totalShots = allSeries.fold(0, (sum, series) => sum + series.shots.length);
-      if (totalShots >= 60) {
-        timer.cancel();
-        setState(() {
-          isSimulating = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Simulation complete. Reset scores to start new simulation.'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+      if (_totalShots >= _simulationMaxShots) {
+        _stopSimulation();
+        _showSnack('Simulation complete. Reset scores to start new simulation.');
         return;
       }
 
-      // Generate random shot
-      final double radius = targetType == TargetType.airPistol ? 170.0 : 80.0;
-      // Generate with gaussian distribution for more realistic grouping
-      final double angle = _random.nextDouble() * 2 * pi;
-      final double r = sqrt(-2 * log(_random.nextDouble())) * 0.3 * radius;
-      final double x = r * cos(angle);
-      final double y = r * sin(angle);
-
-      // Calculate score based on distance from center
-      final distance = sqrt(x * x + y * y);
-      double score;
-      double decimalScore;
-      bool isInnerTen;
-
-      if (targetType == TargetType.airPistol) {
-        score = _calculatePistolScore(distance);
-        decimalScore = _calculatePistolDecimalScore(distance);
-        isInnerTen = distance <= 5.0;
-      } else {
-        score = _calculateRifleScore(distance);
-        decimalScore = _calculateRifleDecimalScore(distance);
-        isInnerTen = distance <= 0.5;
-      }
-
-      // Create shot with coordinates
-      final shot = Shot(x, y, score, decimalScore, isInnerTen, DateTime.now());
-
-      // Add shot
-      _handleShot(shot);
+      _handleShot(_randomShot());
     });
   }
 
-  double _calculatePistolScore(double distance) {
-    final scores = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
-    final zones = [11.5, 27.5, 43.5, 59.5, 75.5, 91.5, 107.5, 123.5, 139.5, 155.5];
-    for (int i = 0; i < zones.length; i++) {
-      if (distance <= zones[i]) return scores[i].toDouble();
-    }
-    return 0;
-  }
+  /// Random shot with a Gaussian-style spread around the centre, scored with
+  /// the normal scoring rules. Shots scoring below [_simulationMinScore] are
+  /// re-rolled, so the lowest simulated score is 2.
+  Shot _randomShot() {
+    final double radius = targetType == TargetType.airPistol ? 170.0 : 80.0;
 
-  double _calculatePistolDecimalScore(double distance) {
-    if (distance <= 11.5) {
-      return 10 + (11.5 - distance) / 11.5;
+    Shot? shot;
+    for (var attempt = 0; attempt < 100; attempt++) {
+      final double angle = _random.nextDouble() * 2 * pi;
+      // 1 - nextDouble() is in (0, 1], so log() never sees zero.
+      final double r =
+          sqrt(-2 * log(1 - _random.nextDouble())) * 0.3 * radius;
+      shot = Shot.fromJson(
+        {'x': r * cos(angle), 'y': r * sin(angle)},
+        targetType,
+      );
+      if (shot.score >= _simulationMinScore) return shot;
     }
-    return _calculatePistolScore(distance);
-  }
 
-  double _calculateRifleScore(double distance) {
-    final scores = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
-    final zones = [5.0, 10.5, 16.0, 21.5, 27.0, 32.5, 38.0, 43.5, 49.0, 54.5];
-    for (int i = 0; i < zones.length; i++) {
-      if (distance <= zones[i]) return scores[i].toDouble();
-    }
-    return 0;
-  }
-
-  double _calculateRifleDecimalScore(double distance) {
-    if (distance <= 5.0) {
-      return 10 + (5.0 - distance) / 5.0;
-    }
-    return _calculateRifleScore(distance);
+    // Practically unreachable; fall back to a safe centre-ish shot.
+    return Shot.fromJson({'x': 0, 'y': 0}, targetType);
   }
 
   @override
@@ -743,13 +736,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 targetType = value
                                     ? TargetType.airRifle
                                     : TargetType.airPistol;
-                                for (var series in allSeries) {
-                                  series.reset();
-                                }
-                                currentSeriesIndex = 0;
-                                totalScore = 0;
-                                totalDecimalScore = 0;
+                                connectionHandler.targetType = targetType;
                               });
+                              _resetSession();
                               Navigator.pop(context);
                             },
                           ),
@@ -845,7 +834,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             icon: Icon(isSimulating ? Icons.stop : Icons.play_arrow),
-            onPressed: _startSimulation,
+            onPressed: _toggleSimulation,
             tooltip: isSimulating ? 'Stop Simulation' : 'Start Simulation',
           ),
           PopupMenuButton<double>(
@@ -887,7 +876,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Total: ${useDecimalScoring ? totalDecimalScore.toStringAsFixed(1) : totalScore.toStringAsFixed(0)}',
+                                'Total: ${formatScore(useDecimalScoring ? totalDecimalScore : totalScore)}',
                                 style: const TextStyle(
                                     fontSize: 20, fontWeight: FontWeight.bold),
                               ),
@@ -932,7 +921,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               final series = allSeries[seriesIndex];
                               return Card(
                                 margin: const EdgeInsets.all(2),
-                                color: seriesIndex == currentSeriesIndex
+                                color: seriesIndex == activeSeriesIndex
                                     ? Colors.blue[50]
                                     : null,
                                 child: Column(
@@ -946,10 +935,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                               style: const TextStyle(
                                                   fontWeight: FontWeight.bold)),
                                           Text(
-                                            useDecimalScoring
-                                                ? series.decimalTotalScore
-                                                    .toStringAsFixed(1)
-                                                : series.totalScore.toStringAsFixed(0),
+                                            formatScore(useDecimalScoring ? series.decimalTotalScore : series.totalScore),
                                             style: const TextStyle(
                                                 fontWeight: FontWeight.bold),
                                           ),
@@ -978,9 +964,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 child: FittedBox(
                                                   fit: BoxFit.scaleDown,
                                                   child: Text(
-                                                    useDecimalScoring
-                                                        ? '${shot.decimalScore.toStringAsFixed(1)}${shot.isInnerTen ? '*' : ''}'
-                                                        : shot.score.toStringAsFixed(0),
+                                                    formatScore(useDecimalScoring ? shot.decimalScore : shot.score),
                                                     style: const TextStyle(
                                                         fontWeight: FontWeight.bold),
                                                   ),
@@ -1087,14 +1071,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                         foregroundPainter: showAnalysis
                                             ? GroupAnalysisPainter(
                                                 shots: allSeries[index].shots,
-                                                scale: (MediaQuery.of(context)
-                                                            .size
-                                                            .width *
-                                                        0.8) /
-                                                    (targetType ==
-                                                            TargetType.airPistol
-                                                        ? (170.0 * 1.2)
-                                                        : (80.0 * 1.2)),
+                                                targetType: targetType,
+                                                zoomLevel: zoomLevel,
                                               )
                                             : null,
                                       ),
@@ -1119,7 +1097,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  'Total: ${useDecimalScoring ? totalDecimalScore.toStringAsFixed(1) : totalScore.toStringAsFixed(0)}',
+                                  'Total: ${formatScore(useDecimalScoring ? totalDecimalScore : totalScore)}',
                                   style: const TextStyle(
                                       fontSize: 20, fontWeight: FontWeight.bold),
                                 ),
@@ -1164,7 +1142,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 final series = allSeries[seriesIndex];
                                 return Card(
                                   margin: const EdgeInsets.all(2),
-                                  color: seriesIndex == currentSeriesIndex
+                                  color: seriesIndex == activeSeriesIndex
                                       ? Colors.blue[50]
                                       : null,
                                   child: Column(
@@ -1178,10 +1156,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 style: const TextStyle(
                                                     fontWeight: FontWeight.bold)),
                                             Text(
-                                              useDecimalScoring
-                                                  ? series.decimalTotalScore
-                                                      .toStringAsFixed(1)
-                                                  : series.totalScore.toStringAsFixed(0),
+                                              formatScore(useDecimalScoring ? series.decimalTotalScore : series.totalScore),
                                               style: const TextStyle(
                                                   fontWeight: FontWeight.bold),
                                             ),
@@ -1210,9 +1185,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   child: FittedBox(
                                                     fit: BoxFit.scaleDown,
                                                     child: Text(
-                                                      useDecimalScoring
-                                                          ? '${shot.decimalScore.toStringAsFixed(1)}${shot.isInnerTen ? '*' : ''}'
-                                                          : shot.score.toStringAsFixed(0),
+                                                      formatScore(useDecimalScoring ? shot.decimalScore : shot.score),
                                                       style: const TextStyle(
                                                           fontWeight: FontWeight.bold),
                                                     ),
@@ -1319,14 +1292,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           foregroundPainter: showAnalysis
                                               ? GroupAnalysisPainter(
                                                   shots: allSeries[index].shots,
-                                                  scale: (MediaQuery.of(context)
-                                                              .size
-                                                              .width *
-                                                          0.8) /
-                                                      (targetType ==
-                                                              TargetType.airPistol
-                                                          ? (170.0 * 1.2)
-                                                          : (80.0 * 1.2)),
+                                                  targetType: targetType,
+                                                  zoomLevel: zoomLevel,
                                                 )
                                               : null,
                                         ),

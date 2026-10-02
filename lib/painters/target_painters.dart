@@ -21,8 +21,10 @@ class AirPistolTargetPainter extends CustomPainter {
     43.5,  // Ring 8
     27.5,  // Ring 9
     11.5,  // Ring 10
-    5.0,   // Inner ten
   ];
+
+  /// Diameter (mm) of the white centre pip. Taking this out scores 10.1.
+  static const double pipDiameter = 1.0;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -98,6 +100,15 @@ class AirPistolTargetPainter extends CustomPainter {
       }
     }
 
+    // Draw the centre pip as a solid white dot
+    canvas.drawCircle(
+      center,
+      (pipDiameter / 2) * effectiveScale,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill,
+    );
+
     // Draw shots
     for (int i = 0; i < shots.length; i++) {
       final shot = shots[i];
@@ -111,7 +122,7 @@ class AirPistolTargetPainter extends CustomPainter {
         center: Alignment.center,
         radius: 0.8,
         colors: [
-          isLatestShot ? Colors.red[400]! : Colors.blue[700]!,
+          isLatestShot ? Colors.blue[100]! : Colors.blue[700]!,
           Colors.black,
         ],
       );
@@ -279,7 +290,7 @@ class AirRifleTargetPainter extends CustomPainter {
         center: Alignment.center,
         radius: 0.8,
         colors: [
-          isLatestShot ? Colors.red[400]! : Colors.blue[700]!,
+          isLatestShot ? Colors.blue[100]! : Colors.blue[700]!,
           Colors.black,
         ],
       );
