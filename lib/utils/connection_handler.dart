@@ -8,6 +8,8 @@ class ConnectionHandler {
   bool isConnected = false;
   DateTime? lastKeepAlive;
   String incomingJSON = "";
+  String? _connectedIp;
+  Timer? _linkWatch;
   final void Function(String) onMessage;
   final void Function(Shot) onShot;
   final void Function() onDisconnect;
@@ -20,6 +22,9 @@ class ConnectionHandler {
 
   /// Target type used to score incoming shots. Can be changed while connected.
   TargetType targetType = TargetType.airPistol;
+
+  /// Completed when the target sends its `freETarget ...` startup line.
+  Completer<void>? _startup;
 
   Future<void> connect(String ip, int port, TargetType targetType) async {
     this.targetType = targetType;
@@ -35,18 +40,39 @@ class ConnectionHandler {
         port,
         timeout: const Duration(seconds: 5),
       );
-      isConnected = true;
-      lastKeepAlive = DateTime.now();
-      onMessage('Connected to ETS');
+      final startup = Completer<void>();
+      _startup = startup;
 
-      socket!.listen(
+      final connected = socket!;
+      connected.listen(
         _handleIncomingData,
-        onError: _handleError,
-        onDone: _handleDisconnection,
+        onError: (error) {
+          if (socket != connected) return;
+          _handleError(error);
+        },
+        onDone: () {
+          if (socket != connected) return;
+          _handleDisconnection();
+        },
       );
+
+      // A TCP handshake is not enough. The icon stays disconnected until the
+      // target sends the startup line it prints after a real connection.
+      await startup.future.timeout(const Duration(seconds: 4));
+      _connectedIp = ip;
+      _startLinkWatch();
+      onMessage('Target ready');
+    } on TimeoutException {
+      await disconnect(quiet: true);
+      onMessage('No startup message from the target.');
     } catch (e) {
       isConnected = false;
+      if (socket != null) {
+        await disconnect(quiet: true);
+      }
       onMessage('Connection failed: ${e.toString()}');
+    } finally {
+      _startup = null;
     }
   }
 
@@ -54,6 +80,14 @@ class ConnectionHandler {
     final received = utf8.decode(data, allowMalformed: true);
 
     onMessage('Original message: $received');
+
+    if (received.contains('freETarget') &&
+        _startup != null &&
+        !_startup!.isCompleted) {
+      isConnected = true;
+      lastKeepAlive = DateTime.now();
+      _startup!.complete();
+    }
 
     lastKeepAlive = DateTime.now();
     incomingJSON += received;
@@ -112,21 +146,82 @@ class ConnectionHandler {
   }
 
   void _handleError(error) {
+    if (_startup != null && !_startup!.isCompleted) {
+      _startup!.completeError(error is Object ? error : StateError('$error'));
+    }
     isConnected = false;
     onMessage('Connection error: ${error.toString()}');
     onDisconnect();
   }
 
   void _handleDisconnection() {
+    if (_startup != null && !_startup!.isCompleted) {
+      _startup!.completeError(const SocketException('closed'));
+    }
+    // disconnect() already reported a close this side started.
+    if (!isConnected) return;
     isConnected = false;
     onMessage('Disconnected from ETS');
     onDisconnect();
   }
 
-  Future<void> disconnect() async {
-    socket?.destroy();
+  Future<void> disconnect({bool quiet = false}) async {
+    _stopLinkWatch();
+    final old = socket;
+    socket = null;
+    _connectedIp = null;
     isConnected = false;
-    onMessage('Disconnected from ETS');
+    old?.destroy();
+    if (!quiet) onMessage('Disconnected from ETS');
+  }
+
+  /// The socket often stays open on paper after the target is powered off.
+  /// The iPad's own address on the target network is the thing that actually
+  /// disappears, so that is what this checks.
+  void _startLinkWatch() {
+    _linkWatch?.cancel();
+    _linkWatch = Timer.periodic(const Duration(seconds: 2), (_) {
+      _checkTargetNetwork();
+    });
+  }
+
+  void _stopLinkWatch() {
+    _linkWatch?.cancel();
+    _linkWatch = null;
+  }
+
+  Future<void> _checkTargetNetwork() async {
+    final ip = _connectedIp;
+    if (!isConnected || ip == null) return;
+    final present = await _ipadIsOnTargetNetwork(ip);
+    if (!isConnected || _connectedIp != ip) return;
+    if (present) return;
+
+    onMessage('Target Wi-Fi is gone.');
+    await disconnect(quiet: true);
+    onDisconnect();
+  }
+
+  Future<bool> _ipadIsOnTargetNetwork(String targetIp) async {
+    final parts = targetIp.split('.');
+    if (parts.length != 4) return true;
+    final prefix = '${parts[0]}.${parts[1]}.${parts[2]}.';
+
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLinkLocal: false,
+      );
+      for (final interface in interfaces) {
+        for (final address in interface.addresses) {
+          if (address.address.startsWith(prefix)) return true;
+        }
+      }
+    } catch (_) {
+      // If the interfaces cannot be read, leave the current state alone.
+      return true;
+    }
+    return false;
   }
 
   void sendSettings(Map<String, dynamic> settings) {
@@ -137,7 +232,26 @@ class ConnectionHandler {
     }
   }
 
+  /// Asks the target to run its startup again. The socket stays open long
+  /// enough for the Arduino to read the command, then this side closes it.
+  /// The iPad stays joined to the target Wi-Fi, so the old socket would
+  /// otherwise keep looking connected after the ESP restarts.
+  Future<void> resetTarget() async {
+    if (!isConnected || socket == null) {
+      onMessage('Connect to the target before resetting it.');
+      return;
+    }
+
+    socket!.write('{"RESET":0}');
+    await socket!.flush();
+    onMessage('Reset sent. Waiting for the target to read it.');
+    await Future.delayed(const Duration(seconds: 1));
+    await disconnect();
+    onDisconnect();
+  }
+
   void dispose() {
+    _stopLinkWatch();
     socket?.destroy();
   }
 }

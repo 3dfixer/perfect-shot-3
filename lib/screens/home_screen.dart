@@ -122,6 +122,34 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Future<void> _resetTarget() async {
+    final ip = ipController.text;
+    final port = int.tryParse(portController.text);
+    await connectionHandler.resetTarget();
+    if (!mounted || port == null) return;
+    setState(() {
+      isConnected = connectionHandler.isConnected;
+    });
+
+    // The ESP-01 spends several seconds rebooting before it will send the
+    // startup line. Connecting sooner opens a socket and looks connected.
+    _addMessage('Waiting for the target to finish restarting.');
+    await Future.delayed(const Duration(seconds: 10));
+    if (!mounted) return;
+
+    for (var attempt = 0; attempt < 6; attempt++) {
+      if (connectionHandler.isConnected) return;
+      await connectionHandler.connect(ip, port, targetType);
+      if (!mounted) return;
+      setState(() {
+        isConnected = connectionHandler.isConnected;
+      });
+      if (connectionHandler.isConnected) return;
+      await Future.delayed(const Duration(seconds: 3));
+      if (!mounted) return;
+    }
+  }
+
   void _handleShot(Shot shot) {
     if (!mounted) return;
 
@@ -748,20 +776,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text('Scoring: ',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          Switch(
-                            value: useDecimalScoring,
-                            onChanged: (value) {
-                              setState(() => useDecimalScoring = value);
-                              Navigator.pop(context);
-                            },
-                          ),
-                          Text(useDecimalScoring ? 'Decimal' : 'Integer'),
-                        ],
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _resetTarget();
+                        },
+                        child: const Text('Reset Target'),
                       ),
                       const SizedBox(height: 8),
                       Row(
@@ -989,56 +1009,52 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ),
-                    SizedBox(
-                      height: MediaQuery.of(context).size.width * 0.9,
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.arrow_left),
-                                onPressed: _canSwipeTargets &&
-                                        currentSeriesIndex > 0
-                                    ? () {
-                                        _targetPageController.previousPage(
-                                          duration:
-                                              const Duration(milliseconds: 300),
-                                          curve: Curves.easeInOut,
-                                        );
-                                      }
-                                    : null,
-                              ),
-                              Text(
-                                'Series ${currentSeriesIndex + 1}',
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.arrow_right),
-                                onPressed: _canSwipeTargets &&
-                                        currentSeriesIndex < 5 &&
-                                        allSeries[currentSeriesIndex + 1]
-                                            .shots
-                                            .isNotEmpty
-                                    ? () {
-                                        _targetPageController.nextPage(
-                                          duration:
-                                              const Duration(milliseconds: 300),
-                                          curve: Curves.easeInOut,
-                                        );
-                                      }
-                                    : null,
-                              ),
-                            ],
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_left),
+                          onPressed: _canSwipeTargets &&
+                                  currentSeriesIndex > 0
+                              ? () {
+                                  _targetPageController.previousPage(
+                                    duration:
+                                        const Duration(milliseconds: 300),
+                                    curve: Curves.easeInOut,
+                                  );
+                                }
+                              : null,
+                        ),
+                        Text(
+                          'Series ${currentSeriesIndex + 1}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
                           ),
-                          Expanded(
-                            child: Center(
-                              child: AspectRatio(
-                                aspectRatio: 1,
-                                child: PageView.builder(
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.arrow_right),
+                          onPressed: _canSwipeTargets &&
+                                  currentSeriesIndex < 5 &&
+                                  allSeries[currentSeriesIndex + 1]
+                                      .shots
+                                      .isNotEmpty
+                              ? () {
+                                  _targetPageController.nextPage(
+                                    duration:
+                                        const Duration(milliseconds: 300),
+                                    curve: Curves.easeInOut,
+                                  );
+                                }
+                              : null,
+                        ),
+                      ],
+                    ),
+                    Expanded(
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: 1,
+                          child: PageView.builder(
                                   controller: _targetPageController,
                                   physics: _canSwipeTargets
                                       ? const AlwaysScrollableScrollPhysics()
@@ -1055,6 +1071,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       minScale: 1.0,
                                       maxScale: 5.0,
                                       child: CustomPaint(
+                                        key: const ValueKey('target-face'),
                                         size: Size.square(
                                             MediaQuery.of(context).size.width *
                                                 0.8),
@@ -1082,9 +1099,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
                   ])
                 : SingleChildScrollView(
                     child: Column(children: [
@@ -1276,6 +1290,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         minScale: 1.0,
                                         maxScale: 5.0,
                                         child: CustomPaint(
+                                          key: const ValueKey('target-face'),
                                           size: Size.square(
                                               MediaQuery.of(context).size.width *
                                                   0.8),
