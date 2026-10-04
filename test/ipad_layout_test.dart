@@ -5,6 +5,8 @@ import 'package:perfect_shot_app/screens/home_screen.dart';
 void main() {
   // iPad mini (6th gen) logical size, in both orientations.
   const sizes = <String, Size>{
+    'iPad mini 4 portrait': Size(768, 1024),
+    'iPad mini 4 landscape': Size(1024, 768),
     'iPad mini portrait': Size(744, 1133),
     'iPad mini landscape': Size(1133, 744),
   };
@@ -19,6 +21,14 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+
+      if (entry.key.contains('portrait')) {
+        final target =
+            tester.getRect(find.byKey(const ValueKey('target-face')).first);
+        expect(target.top, greaterThanOrEqualTo(0));
+        expect(target.bottom, lessThanOrEqualTo(entry.value.height));
+        expect(target.height, closeTo(target.width, 1));
+      }
 
       // Run a few simulated shots so the target and score cards are drawn.
       await tester.tap(find.byTooltip('Start Simulation'));
